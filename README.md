@@ -33,8 +33,6 @@ This tool is designed for videographers, translators, and anyone who needs a fas
 
 ## 🖼️ Screenshots
 
-*(Note: Take screenshots of your app and place them here to show it in action)*
-
 <p align="center">
   <a href="">
       <a href=""><img src="https://raw.githubusercontent.com/testertv/LocalSubtitleEditor/refs/heads/main/images/01.jpg" alt="Local Subtitle Editor Logo" width="1000"></a>
