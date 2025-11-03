@@ -58,7 +58,12 @@ This tool is designed for videographers, translators, and anyone who needs a fas
 2.  Drag and drop the downloaded `index.html` file into your browser window (works on Chrome, Firefox, Edge, etc.).
 4.  Use the "Load Video" and "Load Subtitles" buttons to begin your project.
 
+Or just use it on github:
+
+ <a href="https://testertv.github.io/LocalSubtitleEditor/" ><img src="https://img.shields.io/badge/Demo-Use%20LocalSubtitleEditor%20online-brightgreen.svg" width="250"></a>
+
 That's all! The application is ready to use.
+
 
 ## 🛡️ Privacy Policy
 
