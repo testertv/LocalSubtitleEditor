@@ -1,0 +1,1788 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>LocalSubtitleEditor</title>
+  <style>
+    :root {
+      --bg-color: #1e1e1e; --panel-bg: #252526; --border-color: #3e3e42;
+      --text-color: #cccccc; --text-color-light: #f0f0f0; --input-bg: #3c3c3c;
+      --primary-color: #007acc; --primary-hover: #0090f0; --green-color: #2c9a2c;
+      --row-bg: #2a2a2d; --row-hover-bg: #37373d; --row-active-bg: #094771;
+      --subtitle-color: #ffffff;
+    }
+    *, *::before, *::after { box-sizing: border-box; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+      background-color: var(--bg-color); color: var(--text-color); margin: 0;
+      display: flex; flex-direction: column; height: 100vh; overflow: hidden;
+      user-select: none;
+    }
+
+    /* Allow text selection in inputs/textarea */
+    input, textarea, .subtitle-row input, .subtitle-row textarea { user-select: text; }
+    
+    /* --- ОСНОВНАЯ СТРУКТУРА --- */
+    .app-header {
+      display: flex; align-items: center; gap: 16px; padding: 8px 16px;
+      background-color: var(--panel-bg); border-bottom: 1px solid var(--border-color);
+      flex-shrink: 0;
+    }
+    .app-header .logo { font-size: 1.2em; font-weight: bold; color: var(--text-color-light); }
+    .app-header .separator { flex-grow: 1; }
+    main { display: flex; flex: 1; overflow: hidden; }
+    .left-panel, .right-panel { padding: 16px; display: flex; flex-direction: column; gap: 16px; }
+    .left-panel { flex: 1.2; min-width: 450px; }
+    .right-panel { flex: 1; border-left: 1px solid var(--border-color); }
+    .panel { background: var(--panel-bg); border: 1px solid var(--border-color); border-radius: 6px; padding: 12px; }
+
+    /* --- КНОПКИ И УПРАВЛЕНИЕ --- */
+    .btn {
+      display: inline-flex; align-items: center; gap: 8px; background-color: var(--primary-color);
+      color: white; border: none; padding: 8px 14px; border-radius: 5px;
+      cursor: pointer; font-size: 14px; transition: background-color 0.2s;
+    }
+    .btn:hover { background-color: var(--primary-hover); }
+    .btn:disabled { background-color: #555; cursor: not-allowed; }
+    .btn.icon-btn { padding: 8px; }
+    .btn.secondary { background-color: #4f4f53; }
+    .btn.secondary:hover { background-color: #636369; }
+    .btn.green { background-color: var(--green-color); }
+    .btn.green:hover { background-color: #38b038; }
+    input[type="file"] { display: none; }
+    
+    .file-input-group { display: flex; gap: 20px;}
+    .file-input-group .btn:first-child { border-top-right-radius: 5px; border-bottom-right-radius: 5px; }
+    .file-input-group .btn:last-child { border-top-left-radius: 5px; border-bottom-left-radius: 5px; border-left: 1px solid #ffffff30; }
+
+    /* --- ПАНЕЛИ И ИХ СОДЕРЖИМОЕ --- */
+    .video-wrapper {
+      position: relative; background: #000; max-height: 50vh; display: flex; align-items: center; justify-content: center; border-radius: 6px; overflow: hidden;
+      cursor: pointer;
+    }
+    video { max-width: 100%; max-height: 100%; display: block; }
+    #subtitle-preview {
+      position: absolute; bottom: 7%; left: 50%; transform: translateX(-50%);
+      background-color: rgba(0,0,0,0.7); color: var(--subtitle-color, #ffffff);
+      padding: 8px 18px; border-radius: 5px; font-size: 1.3em; text-align: center; pointer-events: none;
+      white-space: pre-line;
+    }
+    #media-info { font-size: 13px; color: #999; text-align: center; margin-top: -8px; }
+    .toolbar { display: flex; justify-content: center; align-items: center; gap: 8px; flex-wrap: wrap; }
+    .waveform-wrapper { position: relative; width: 100%; height: 100px; background-color: #2d2d30; border-radius: 4px; cursor: default; }
+    #waveform-canvas { width: 100%; height: 100%; display: block; }
+    #waveform-playhead { position: absolute; top: 0; left: 0; width: 2px; height: 100%; background-color: #66ff66; pointer-events: none; }
+	#waveform-status {
+	  position: absolute;
+	  top: 50%; left: 50%; transform: translate(-50%,-50%);
+	  color: #ddd; background: #00000066; padding: 6px 10px; border-radius: 4px; font-size: 13px; display: none;
+	  pointer-events: none; /* не мешает взаимодействию с волной */
+	}
+    #list { overflow-y: auto; flex: 1; }
+    
+    /* --- СПИСОК СУБТИТРОВ --- */
+    .subtitle-row {
+      display: grid;
+      grid-template-columns: 98px 1fr auto;
+      gap: 8px; align-items: start; padding: 10px; border-bottom: 1px solid var(--border-color);
+      transition: background-color 0.2s;
+      position: relative;
+    }
+    .subtitle-row:hover { background-color: var(--row-hover-bg); }
+    .subtitle-row.active { background-color: var(--row-active-bg); }
+
+    .subtitle-row .row-actions { align-self: center; }
+	
+    /* Drag & Drop визуализация */
+    .subtitle-row.dragging { opacity: 0.6; }
+    .subtitle-row.drop-target-before::before,
+    .subtitle-row.drop-target-after::after {
+      content: "";
+      position: absolute;
+      left: 6px; right: 6px;
+      height: 2px;
+      background: var(--primary-color);
+    }
+    .subtitle-row.drop-target-before::before { top: 0; }
+    .subtitle-row.drop-target-after::after  { bottom: 0; }
+    .btn.drag-handle { cursor: grab; }
+    .btn.drag-handle:active { cursor: grabbing; }
+
+    .time-col {
+      display: flex; flex-direction: column; gap: 6px;
+      align-self: stretch; justify-content: center;
+    }
+    input.time, textarea.text {
+      background-color: var(--input-bg); color: var(--text-color);
+      border: 1px solid var(--border-color); border-radius: 4px;
+      padding: 6px 8px; font-family: monospace; width: 100%; transition: border-color 0.2s;
+    }
+    .time-col .time { font-size: 12px; padding: 4px 6px; }
+    input.time:focus, textarea.text:focus { border-color: var(--primary-color); outline: none; }
+    textarea.text { font-family: inherit; resize: vertical; min-height: 42px; }
+    .row-actions { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
+
+    /* --- СТИЛИЗАЦИЯ ФОРМ --- */
+    .styled-select { position: relative; display: inline-block; }
+    .styled-select select { appearance: none; -webkit-appearance: none; background-color: var(--input-bg); color: var(--text-color); border: 1px solid var(--border-color); border-radius: 5px; padding: 8px 30px 8px 12px; cursor: pointer; }
+    .styled-select::after { content: '▼'; font-size: 12px; color: var(--text-color); position: absolute; right: 12px; top: 50%; transform: translateY(-50%); pointer-events: none; }
+
+    /* --- RANGE --- */
+    .volume-control { display: flex; align-items: center; gap: 8px; margin-left: auto; }
+    .volume-control .icon { font-size: 18px; }
+    input[type=range] {
+      -webkit-appearance: none;
+      background: transparent;
+      cursor: pointer;
+      width: 100px;
+      background-image: linear-gradient(to right, var(--primary-color), var(--primary-color));
+      background-size: var(--value-percent, 0%) 6px;
+      background-position: left center;
+      background-repeat: no-repeat;
+    }
+    input[type=range]::-webkit-slider-runnable-track { width: 100%; height: 6px; background: #444; border-radius: 3px; }
+    input[type=range]::-webkit-slider-thumb {
+      -webkit-appearance: none; appearance: none; margin-top: -5px;
+      height: 16px; width: 16px; background-color: var(--primary-color); border-radius: 50%;
+      border: 2px solid var(--bg-color);
+    }
+    input[type=range]::-moz-range-track { height: 6px; background: #444; border: none; border-radius: 3px; }
+    input[type=range]::-moz-range-progress { height: 6px; background: var(--primary-color); border: none; border-radius: 3px; }
+
+    /* --- Слайдер перемотки (под видео) --- */
+    .seekbar-container { display: flex; align-items: center; gap: 12px; padding: 6px 2px 0 2px; }
+    .seekbar-time { font-variant-numeric: tabular-nums; font-family: monospace; font-size: 12px; color: #aaa; min-width: 110px; text-align: center; }
+    #seekbar { flex: 1; width: auto; background-size: var(--value-percent, 0%) 8px; background-position: left center; }
+    #seekbar::-webkit-slider-runnable-track { height: 8px; }
+    #seekbar::-webkit-slider-thumb { margin-top: -4px; }
+    #seekbar::-moz-range-track { height: 8px; }
+    #seekbar::-moz-range-progress { height: 8px; }
+
+    /* --- Пан-слайдер под волной --- */
+    .panbar-container { display: flex; align-items: center; gap: 12px; padding: 4px 2px 0 2px; }
+    #pan-slider { flex: 1; width: auto; }
+
+    /* --- Color picker swatch --- */
+    .swatch {
+      display: inline-block; width: 14px; height: 14px; border-radius: 3px;
+      border: 1px solid #00000044; margin-left: 4px; vertical-align: middle;
+      box-shadow: inset 0 0 0 1px #00000022;
+    }
+    .visually-hidden-input { position: absolute; opacity: 0; width: 0; height: 0; pointer-events: none; }
+    #shift-back-btn { margin-left: 12px; }
+  </style>
+</head>
+<body>
+
+<header class="app-header">
+  <div class="logo">
+    <span>Local</span>
+    <span style="color: #0090f0;">Subtitle</span>
+    <span>Editor</span>
+  </div>
+
+  <button id="new-btn" class="btn secondary">🆕 Новый проект</button>
+  <div class="separator"></div>
+  <div class="file-input-group">
+    <label for="file-vid" class="btn">📹🎙 Загрузить видео | аудио</label>
+    <label for="file-sub" class="btn">📝 Загрузить субтитры</label>
+    <input type="file" id="file-vid" accept="video/*,audio/*">
+    <input type="file" id="file-sub" accept=".srt,.vtt,.txt">
+  </div>
+  <div class="styled-select">
+    <select id="save-format">
+      <option value="srt">SRT</option> <option value="vtt">VTT</option> <option value="txt">TXT</option> <option value="csv">CSV</option>
+    </select>
+  </div>
+  <button id="save-btn" class="btn green">💾 Сохранить</button>
+</header>
+
+<main id="main-content">
+  <div class="left-panel">
+    <div class="video-wrapper">
+      <video id="video"></video>
+      <div id="subtitle-preview"></div>
+    </div>
+
+    <div class="seekbar-container">
+      <span id="current-time" class="seekbar-time">00:00:00,000</span>
+      <input type="range" id="seekbar" min="0" max="1" step="0.01" value="0" title="Перемотка" disabled>
+      <span id="total-duration" class="seekbar-time">00:00:00,000</span>
+    </div>
+
+    <div id="media-info"></div>
+    <div class="panel">
+      <div class="toolbar">
+        <button id="jump-start-btn" class="btn icon-btn" title="К началу субтитра">⏮️</button>
+        <button id="play-pause-btn" class="btn icon-btn" title="Воспроизвести/Пауза (Пробел)">
+          <span id="play-pause-label">▶️</span>
+        </button>
+        <button id="stop-btn" class="btn icon-btn" title="Остановить">⏹️</button>
+        <button id="jump-end-btn" class="btn icon-btn" title="К концу субтитра">⏭️</button>
+        <button id="shift-back-btn" class="btn icon-btn" title="Сдвинуть назад (-1с)">˂1sec</button>
+        <button id="shift-fwd-btn" class="btn icon-btn" title="Сдвинуть вперед (+1с)">1sec></button>
+        <button id="set-start-btn" class="btn icon-btn" title="Установить начало ([)">⊢</button>
+        <button id="set-end-btn" class="btn icon-btn" title="Установить конец (])">⊣</button>
+
+        <div class="volume-control">
+            <span class="icon" aria-hidden="true">🔊</span>
+            <input type="range" id="volume" min="0" max="1" step="0.05" value="1" title="Громкость">
+        </div>
+      </div>
+    </div>
+
+    <div class="waveform-wrapper">
+      <canvas id="waveform-canvas"></canvas>
+      <div id="waveform-playhead"></div>
+      <div id="waveform-status">Анализ аудио…</div>
+    </div>
+
+    <!-- Панорамирование окна просмотра волны -->
+    <div class="panbar-container">
+      <input type="range" id="pan-slider" min="0" max="0" step="0.01" value="0" title="Панорамирование волны" disabled>
+    </div>
+  </div>
+
+  <div class="right-panel">
+    <div class="panel">
+        <div class="toolbar">
+            <button id="add-btn" class="btn">➕ Добавить</button>
+            <button id="sort-btn" class="btn secondary">🔀 Сортировать</button>
+            <div class="separator"></div>
+            <button id="undo-btn" class="btn secondary icon-btn" title="Отменить">↩️</button>
+            <button id="redo-btn" class="btn secondary icon-btn" title="Повторить">↪️</button>
+            <button id="toggle-find-btn" class="btn secondary icon-btn" title="Найти/Заменить">🔎</button>
+
+            <!-- Кнопка выбора цвета -->
+            <button id="color-btn" class="btn secondary icon-btn" title="Цвет текста">🎨 <span id="color-swatch" class="swatch"></span></button>
+            <input type="color" id="color-input" class="visually-hidden-input" value="#ffffff">
+        </div>
+
+        <div id="find-replace-wrapper" class="find-replace" style="margin-top: 10px; display: none;">
+            <input type="text" id="find-input" placeholder="Найти..." class="time" style="font-family: inherit;">
+            <input type="text" id="replace-input" placeholder="Заменить на..." class="time" style="font-family: inherit;">
+            <button id="replace-btn" class="btn secondary">Заменить все</button>
+        </div>
+    </div>
+    <div id="list" class="panel" style="padding: 0; flex-grow: 1;"></div>
+  </div>
+</main>
+
+
+<script>
+// DOM Elements
+const video = document.getElementById('video'); const list = document.getElementById('list'); const fileVid = document.getElementById('file-vid');
+const fileSub = document.getElementById('file-sub'); const saveBtn = document.getElementById('save-btn'); const saveFmt = document.getElementById('save-format');
+const addBtn = document.getElementById('add-btn'); const sortBtn = document.getElementById('sort-btn'); const mediaInfo = document.getElementById('media-info');
+const vol = document.getElementById('volume'); const undoBtn = document.getElementById('undo-btn'); const redoBtn = document.getElementById('redo-btn');
+const newBtn = document.getElementById('new-btn'); const toggleFindBtn = document.getElementById('toggle-find-btn'); const findReplaceWrapper = document.getElementById('find-replace-wrapper');
+const findInput = document.getElementById('find-input'); const replaceInput = document.getElementById('replace-input'); const replaceBtn = document.getElementById('replace-btn');
+const jumpStartBtn = document.getElementById('jump-start-btn'); const jumpEndBtn = document.getElementById('jump-end-btn'); const setStartBtn = document.getElementById('set-start-btn');
+const setEndBtn = document.getElementById('set-end-btn'); const shiftBackBtn = document.getElementById('shift-back-btn'); const shiftFwdBtn = document.getElementById('shift-fwd-btn');
+const playPauseBtn = document.getElementById('play-pause-btn'); const stopBtn = document.getElementById('stop-btn'); const subtitlePreview = document.getElementById('subtitle-preview');
+const waveformCanvas = document.getElementById('waveform-canvas'); const waveformPlayhead = document.getElementById('waveform-playhead');
+const waveformCtx = waveformCanvas.getContext('2d');
+const playPauseLabel = document.getElementById('play-pause-label');
+const videoWrapper = document.querySelector('.video-wrapper');
+const panSlider = document.getElementById('pan-slider');
+const waveformStatus = document.getElementById('waveform-status');
+
+/* Color picker elements */
+const colorBtn = document.getElementById('color-btn');
+const colorInput = document.getElementById('color-input');
+const colorSwatch = document.getElementById('color-swatch');
+
+/* Seekbar DOM */
+const seekbar = document.getElementById('seekbar');
+const currentTimeEl = document.getElementById('current-time');
+const totalDurationEl = document.getElementById('total-duration');
+
+// State
+let cues = []; let selected = -1; let history = []; let future = []; let audioBuffer = null; let filteredData = null;
+const WAVEFORM_HANDLE_WIDTH = 8;
+const CLICK_DRAG_THRESHOLD_PX = 4;
+const waveformState = { action: null, selectedIndex: -1, initialMouseX: 0, initialCueStart: 0, initialCueEnd: 0, dragMoved: false };
+
+// ===== Auto line-break & auto split (SubtitleEdit-like) =====
+const AUTO_RULES = {
+  maxCpl: 42,        // Max characters per line
+  maxLines: 2,       // Max lines per subtitle
+  targetCps: 17,     // Target reading speed (chars/sec) [not hard used, FYI]
+  hardMaxCps: 20,    // If above this — suggest/force split
+  minPartDuration: 0.6 // Min duration (s) per part after split
+};
+
+function normalizeSpacesKeepNewlines(s) {
+  return (s || '')
+    .replace(/\r\n?/g, '\n')
+    .replace(/[ \t]+/g, ' ')
+    .replace(/ ?\n ?/g, '\n')
+    .trim();
+}
+
+function calcCpsForCue(cue) {
+  const dur = Math.max(0.001, cue.end - cue.start);
+  const plain = normalizeSpacesKeepNewlines((cue.text || '').replace(/\n/g, ' '));
+  return plain.length / dur;
+}
+
+// Greedy wrap: keeps <= maxCpl, up to maxLines. Does a simple 2-line rebalance.
+function autoLineBreakText(s, maxCpl = AUTO_RULES.maxCpl, maxLines = AUTO_RULES.maxLines) {
+  s = normalizeSpacesKeepNewlines(s);
+  if (!s) return s;
+
+  const words = s.split(' ');
+  const lines = [];
+  let current = '';
+
+  const pushLine = () => { lines.push(current); current = ''; };
+
+  for (const w of words) {
+    if (!w) continue;
+    const candidate = current ? `${current} ${w}` : w;
+    if (candidate.length <= maxCpl) {
+      current = candidate;
+    } else {
+      if (!current) {
+        // long word — hard cut
+        lines.push(w.slice(0, maxCpl));
+        current = w.slice(maxCpl);
+      } else {
+        pushLine();
+        current = w;
+      }
+    }
+    if (lines.length >= maxLines) break;
+  }
+  if (current && lines.length < maxLines) lines.push(current);
+
+  if (lines.length > maxLines) {
+    const head = lines.slice(0, maxLines - 1);
+    const tail = lines.slice(maxLines - 1).join(' ');
+    return [...head, tail].join('\n');
+  }
+
+  // Simple balance for 2 lines
+  if (maxLines === 2 && lines.length === 2) {
+    let [a, b] = lines;
+    if (Math.abs(a.length - b.length) > 8) {
+      if (a.length > b.length) {
+        const idx = a.lastIndexOf(' ');
+        if (idx > 0) {
+          const move = a.slice(idx + 1);
+          if ((b ? b + ' ' : '').length + move.length <= maxCpl) {
+            a = a.slice(0, idx);
+            b = b ? `${b} ${move}` : move;
+          }
+        }
+      } else {
+        const idx = b.indexOf(' ');
+        if (idx > 0) {
+          const move = b.slice(0, idx);
+          if ((a ? a + ' ' : '').length + move.length <= maxCpl) {
+            b = b.slice(idx + 1);
+            a = a ? `${a} ${move}` : move;
+          }
+        }
+      }
+      lines[0] = a; lines[1] = b;
+    }
+  }
+
+  return lines.join('\n');
+}
+
+function autoLineBreakCue(index) {
+  const c = cues[index]; if (!c) return;
+  const before = c.text || '';
+  const after = autoLineBreakText(before, AUTO_RULES.maxCpl, AUTO_RULES.maxLines);
+  if (after !== before) {
+    pushHistory();
+    c.text = after;
+    render();
+  }
+}
+
+// Find a natural split point near the middle (punctuation/newline/dash/space) — on ORIGINAL text
+function findAutoSplitIndex(src) {
+  const s = String(src || '');
+  const len = s.length;
+  if (len < 2) return -1;
+
+  const mid = Math.floor(len / 2);
+  const candidates = [];
+
+  // After punctuation like ". " "! " "? " "… " "; " ": "
+  for (const m of s.matchAll(/([\.!?…;:])\s+/g)) {
+    const pos = (m.index ?? 0) + m[0].length;
+    candidates.push(pos);
+  }
+  // Around spaced dashes: " — " or " - "
+  for (const m of s.matchAll(/\s[—-]\s/g)) {
+    const pos = (m.index ?? 0) + m[0].length; // split after the pattern
+    candidates.push(pos);
+  }
+  // Newlines
+  for (let i = 0; i < len; i++) if (s[i] === '\n') candidates.push(i + 1);
+  // Nearest spaces to middle
+  const leftSpace = s.lastIndexOf(' ', mid);
+  if (leftSpace > 0) candidates.push(leftSpace + 1);
+  const rightSpace = s.indexOf(' ', mid);
+  if (rightSpace > 0) candidates.push(rightSpace + 1);
+
+  const uniq = [...new Set(candidates)].filter(pos => pos > 3 && pos < len - 3);
+  if (!uniq.length) return -1;
+
+  const isStrong = (pos) => {
+    const prev = s[pos - 1];
+    return /[\.!?…;:—-]/.test(prev) || prev === '\n';
+  };
+
+  uniq.sort((a, b) => {
+    const da = Math.abs(a - mid) + (isStrong(a) ? 0 : 10);
+    const db = Math.abs(b - mid) + (isStrong(b) ? 0 : 10);
+    return da - db;
+  });
+
+  for (const pos of uniq) {
+    if (pos < len * 0.2 || pos > len * 0.8) continue; // avoid extreme unbalance
+    return pos;
+  }
+  return uniq[0];
+}
+
+// Замените текущую функцию autoSplitCue на эту:
+function autoSplitCue(index) {
+  const c = cues[index];
+  if (!c || !c.text) return;
+
+  const pos = findAutoSplitIndex(c.text);
+  if (pos <= 0 || pos >= c.text.length) return;
+
+  pushHistory();
+
+  // Сохраняем оригинальный текст
+  const originalText = c.text;
+  const leftText = originalText.slice(0, pos).trim();
+  const rightText = originalText.slice(pos).trim();
+
+  // Рассчитываем пропорциональное распределение времени
+  const totalDuration = c.end - c.start;
+  const leftRatio = leftText.length / originalText.length;
+  const splitTime = c.start + totalDuration * leftRatio;
+
+  // Создаем новый субтитр
+  const newCue = {
+    start: splitTime,
+    end: c.end,
+    text: rightText
+  };
+
+  // Обновляем текущий субтитр
+  c.text = leftText;
+  c.end = splitTime;
+
+  // Вставляем новый субтитр
+  cues.splice(index + 1, 0, newCue);
+  selected = index + 1;
+
+  // Применяем авто-перенос к обеим частям
+  autoLineBreakCue(index);
+  autoLineBreakCue(index + 1);
+
+  render();
+}
+
+// Замените текущую функцию autoLineBreakText на эту:
+function autoLineBreakText(s, maxCpl = AUTO_RULES.maxCpl, maxLines = AUTO_RULES.maxLines) {
+  s = normalizeSpacesKeepNewlines(s);
+  if (!s) return s;
+
+  // Проверяем существующие разрывы строк
+  const existingLines = s.split('\n');
+  if (existingLines.length <= maxLines &&
+      existingLines.every(line => line.length <= maxCpl)) {
+    return s;
+  }
+
+  // Если уже есть разрывы, но они слишком длинные - исправляем их
+  if (existingLines.length <= maxLines) {
+    return existingLines.map(line =>
+      line.length > maxCpl ?
+        line.match(new RegExp(`.{1,${maxCpl}}(?:\\s|$)|.+?\\s+`, 'g'))
+          .map(part => part.trim()).join('\n') : line
+    ).join('\n');
+  }
+
+  // Если слишком много строк - объединяем и переразбиваем
+  const words = s.split(' ');
+  const lines = [];
+  let currentLine = '';
+
+  for (const word of words) {
+    if (!word) continue;
+
+    const testLine = currentLine ? `${currentLine} ${word}` : word;
+    if (testLine.length <= maxCpl) {
+      currentLine = testLine;
+    } else {
+      if (currentLine) {
+        lines.push(currentLine);
+        currentLine = word;
+      } else {
+        // Если слово само по себе слишком длинное
+        if (word.length > maxCpl) {
+          const chunks = word.match(new RegExp(`.{1,${maxCpl}}`, 'g')) || [word];
+          lines.push(...chunks.slice(0, -1));
+          currentLine = chunks[chunks.length - 1];
+        } else {
+          lines.push(word);
+          currentLine = '';
+        }
+      }
+    }
+
+    if (lines.length >= maxLines - 1) break;
+  }
+
+  if (currentLine) lines.push(currentLine);
+
+  // Балансировка строк (перераспределение слов для более равномерного распределения)
+  if (lines.length === maxLines && lines.length > 1) {
+    const totalLength = lines.reduce((sum, line) => sum + line.length, 0);
+    const avgLength = Math.floor(totalLength / maxLines);
+
+    // Попробуем перераспределить слова для более равномерного распределения
+    const allWords = lines.join(' ').split(' ');
+    const newLines = [];
+    let current = '';
+
+    for (const word of allWords) {
+      const testLine = current ? `${current} ${word}` : word;
+      if (testLine.length <= avgLength + 2) { // +2 для небольшого запаса
+        current = testLine;
+      } else {
+        newLines.push(current);
+        current = word;
+      }
+    }
+
+    if (current) newLines.push(current);
+    if (newLines.length <= maxLines) {
+      return newLines.join('\n');
+    }
+  }
+
+  return lines.join('\n');
+}
+
+// Auto-fix after user edits: wrap if lines too long, then split if speed/size too high
+function maybeAutoFix(index) {
+  const c = cues[index];
+  if (!c) return;
+
+  // Проверяем минимальную длительность
+  if (c.end - c.start < AUTO_RULES.minPartDuration) {
+    c.end = c.start + AUTO_RULES.minPartDuration;
+  }
+
+  const lines = (c.text || '').split('\n');
+  const longest = lines.reduce((m, ln) => Math.max(m, ln.length), 0);
+
+  if (longest > AUTO_RULES.maxCpl || lines.length > AUTO_RULES.maxLines) {
+    autoLineBreakCue(index);
+  }
+
+  const cue = cues[index];
+  const cps = calcCpsForCue(cue);
+  const totalChars = normalizeSpacesKeepNewlines((cue.text || '').replace(/\n/g, ' ')).length;
+  const maxAllowedChars = AUTO_RULES.maxCpl * AUTO_RULES.maxLines;
+  const tooMuchText = totalChars > maxAllowedChars * 1.4;
+
+  if (cps > AUTO_RULES.hardMaxCps || tooMuchText) {
+    autoSplitCue(index);
+  }
+}
+
+/* Zoom/Pan state for waveform */
+let viewStart = 0, viewEnd = 0; // seconds
+const MIN_VIEW_SEC = 0.2; // минимальная ширина окна просмотра (сек)
+
+/* Middle-button pan state */
+const panDrag = { active: false, startX: 0, initViewStart: 0, initViewEnd: 0 };
+
+/* Drag & Drop state (список) */
+let dragFromIndex = -1;
+let dragOverIndex = -1;
+let dragOverPos = 'after'; // 'before' | 'after'
+
+/* Object URL state for video cleanup */
+let currentObjectUrl = null;
+
+/* Throttled redraw */
+let rafId = 0;
+function scheduleDraw() {
+  if (rafId) return;
+  rafId = requestAnimationFrame(() => {
+    drawWaveform();
+    updatePlayhead();
+    rafId = 0;
+  });
+}
+
+/* Volume slider fill */
+function updateVolumeSlider() {
+  const percent = (vol.value - vol.min) / (vol.max - vol.min) * 100;
+  vol.style.setProperty('--value-percent', `${percent}%`);
+}
+
+/* Seekbar helpers */
+function updateSeekbarFill() {
+  const max = parseFloat(seekbar.max) || 1;
+  const value = parseFloat(seekbar.value) || 0;
+  const percent = Math.min(100, Math.max(0, (value / max) * 100));
+  seekbar.style.setProperty('--value-percent', `${percent}%`);
+}
+function resetSeekbar() {
+  seekbar.value = 0;
+  seekbar.max = 1;
+  seekbar.disabled = true;
+  currentTimeEl.textContent = formatTime(0);
+  totalDurationEl.textContent = formatTime(0);
+  updateSeekbarFill();
+}
+
+/* Pan-slider UI */
+function updatePanSliderFill() {
+  if (!panSlider) return;
+  const max = parseFloat(panSlider.max) || 1;
+  const value = parseFloat(panSlider.value) || 0;
+  const percent = Math.min(100, Math.max(0, (value / max) * 100));
+  panSlider.style.setProperty('--value-percent', `${percent}%`);
+}
+function updatePanSlider() {
+  if (!panSlider) return;
+  if (!audioBuffer) {
+    panSlider.disabled = true;
+    panSlider.min = "0"; panSlider.max = "1"; panSlider.value = "0"; panSlider.step = "0.01";
+    updatePanSliderFill();
+    return;
+  }
+  const dur = audioBuffer.duration || 0;
+  const viewLen = Math.max(MIN_VIEW_SEC, Math.min(dur, (viewEnd - viewStart) || 0));
+  const maxStart = Math.max(0, dur - viewLen);
+  panSlider.min = "0";
+  panSlider.max = maxStart.toFixed(3);
+  panSlider.step = Math.max(0.001, viewLen / 100).toFixed(3);
+  panSlider.value = Math.max(0, Math.min(maxStart, viewStart)).toFixed(3);
+  panSlider.disabled = (maxStart <= 0.0005);
+  updatePanSliderFill();
+}
+
+// История
+function pushHistory() { history.push(JSON.stringify(cues)); if (history.length > 50) history.shift(); future = []; updateUndoRedoButtons(); }
+function undo() { if (history.length > 1) { future.push(history.pop()); cues = JSON.parse(history[history.length-1]); if (selected >= cues.length) selected = cues.length - 1; render(); updateUndoRedoButtons(); } }
+function redo() { if (future.length > 0) { const nextState = future.pop(); history.push(nextState); cues = JSON.parse(nextState); if (selected >= cues.length) selected = cues.length - 1; render(); updateUndoRedoButtons(); } }
+function updateUndoRedoButtons() { undoBtn.disabled = history.length <= 1; redoBtn.disabled = future.length === 0; }
+
+// Время формат/парс
+function formatTime(s, useDot = false) {
+  let ts = Math.max(0, s);
+  let h = Math.floor(ts / 3600);
+  let m = Math.floor((ts % 3600) / 60);
+  let sec = Math.floor(ts % 60);
+  let ms = Math.round((ts - Math.floor(ts)) * 1000);
+  if (ms === 1000) { ms = 0; sec++; if (sec === 60) { sec = 0; m++; if (m === 60) { m = 0; h++; } } }
+  const sep = useDot ? '.' : ',';
+  return `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}:${String(sec).padStart(2,'0')}${sep}${String(ms).padStart(3,'0')}`;
+}
+function parseTime(t) {
+  if (!t) return 0;
+  const p = t.split(/[:,.]/);
+  if (p.length === 4) return parseInt(p[0]) * 3600 + parseInt(p[1]) * 60 + parseInt(p[2]) + parseInt(p[3]) / 1000;
+  if (p.length === 3) return parseInt(p[0]) * 60 + parseInt(p[1]) + parseInt(p[2]) / 1000;
+  return parseFloat(t) || 0;
+}
+
+// Помощники
+function escapeHtml(str){ return (str||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+function escapeRegex(s) { return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }
+function getFilteredIndices() {
+  const q = (findInput.value || '').trim().toLowerCase();
+  if (!q) return cues.map((_, i) => i);
+  const out = [];
+  for (let i = 0; i < cues.length; i++) {
+    const t = (cues[i].text || '').toLowerCase();
+    if (t.includes(q)) out.push(i);
+  }
+  return out;
+}
+
+function updateFindCount() {
+  if (!findInput) return;
+  const q = (findInput.value || '').trim();
+  if (!q) { findInput.title = ''; return; }
+  const indices = getFilteredIndices();
+  const re = new RegExp(escapeRegex(q), 'gi');
+  let total = 0;
+  for (const i of indices) {
+    const m = (cues[i].text || '').match(re);
+    if (m) total += m.length;
+  }
+  findInput.title = `Совпадений: ${total} (реплик: ${indices.length})`;
+}
+// Отрисовка списка и волны
+function render() {
+  list.innerHTML = '';
+
+  const indices = getFilteredIndices();
+
+  if (indices.length === 0) {
+    const empty = document.createElement('div');
+    empty.style.padding = '12px';
+    empty.style.color = '#999';
+    empty.textContent = 'Ничего не найдено';
+    list.appendChild(empty);
+    drawWaveform();
+    updateFindCount();
+    return;
+  }
+
+  indices.forEach((i) => {
+    const c = cues[i];
+    const row = document.createElement('div'); 
+    row.className = `subtitle-row ${i === selected ? 'active' : ''}`; 
+    row.dataset.i = i;
+
+    row.innerHTML = `
+      <div class="time-col">
+        <input class="time start" type="text" value="${formatTime(c.start)}" title="Начало">
+        <input class="time end" type="text" value="${formatTime(c.end)}" title="Конец">
+      </div>
+      <textarea class="text" spellcheck="false">${escapeHtml(c.text)}</textarea>
+      <div class="row-actions">
+        <button class="btn icon-btn secondary" title="Перейти к началу">▶️</button>
+        <button class="btn icon-btn secondary" title="Объединить" ${i===0?'disabled':''}>🔗</button>
+        <button class="btn icon-btn secondary drag-handle" title="Перетащить">↕️</button>
+
+        <button class="btn icon-btn secondary" title="Авто перенос строк (≤${AUTO_RULES.maxCpl} CPL, ≤${AUTO_RULES.maxLines} стр.)" data-action="autobr">⤶</button>
+        <button class="btn icon-btn secondary" title="Авто разрезать на 2" data-action="autosplit">✂️</button>
+        <button class="btn icon-btn secondary" title="Удалить">🗑️</button>
+      </div>`;
+
+    list.appendChild(row);
+
+    const [startInput, endInput, txt] = [
+      row.querySelector('.start'), 
+      row.querySelector('.end'), 
+      row.querySelector('.text')
+    ];
+
+    startInput.addEventListener('change',()=>{ 
+      pushHistory(); 
+      c.start=Math.max(0, parseTime(startInput.value)); 
+      if(c.start>=c.end)c.end=c.start+0.5; 
+      render(); 
+    });
+
+    endInput.addEventListener('change',()=>{ 
+      pushHistory(); 
+      c.end=Math.max(0, parseTime(endInput.value)); 
+      if(c.end<=c.start)c.end=c.start+0.5; 
+      render(); 
+    });
+
+    txt.addEventListener('input',()=>{ 
+      c.text=txt.value; 
+      future=[]; 
+      updateUndoRedoButtons(); 
+    });
+    txt.addEventListener('change',()=>{ pushHistory(); });
+    txt.addEventListener('keydown',(ev)=>{
+      if(ev.key==='Enter'&&ev.shiftKey){ev.preventDefault();pushHistory();splitAtCaret(i,txt.selectionStart);} 
+      else if(ev.key==='Backspace'&&ev.shiftKey){ev.preventDefault();if(i>0){pushHistory();mergeWithPrevious(i);}} 
+    });
+
+    const actionBtns = row.querySelectorAll('.row-actions .btn');
+    const goBtn = actionBtns[0];
+    const mergeBtn = actionBtns[1];
+    const dragBtn = actionBtns[2];
+    const delBtn = actionBtns[5];
+    const autoBrBtn    = row.querySelector('[data-action="autobr"]');
+    const autoSplitBtn = row.querySelector('[data-action="autosplit"]');
+
+    goBtn.addEventListener('click',(e)=>{ e.stopPropagation(); video.currentTime=c.start; safePlay(); });
+    mergeBtn.addEventListener('click',(e)=>{ e.stopPropagation(); if(i>0){pushHistory(); mergeWithPrevious(i);}});
+    delBtn.addEventListener('click',(e)=>{ e.stopPropagation(); pushHistory(); deleteCue(i); });
+    autoBrBtn.addEventListener('click', (e) => { e.stopPropagation(); autoLineBreakCue(i); });
+    autoSplitBtn.addEventListener('click', (e) => { e.stopPropagation(); autoSplitCue(i); });
+
+    row.addEventListener('click',(ev)=>{ 
+      if(!ev.target.closest('button, input, textarea')){ 
+        setSelectedIndex(i, {rerender: true, scroll: false}); 
+      } 
+    });
+
+    // Drag handle
+    dragBtn.setAttribute('draggable', 'true');
+    dragBtn.addEventListener('dragstart', (ev) => {
+      dragFromIndex = i;
+      row.classList.add('dragging');
+      ev.dataTransfer.effectAllowed = 'move';
+      ev.dataTransfer.setData('text/plain', String(i));
+    });
+    dragBtn.addEventListener('dragend', () => {
+      row.classList.remove('dragging');
+      clearDropMarkers();
+      dragFromIndex = -1;
+    });
+
+    row.addEventListener('dragover', (ev) => handleDragOverRow(row, i, ev));
+    row.addEventListener('dragleave', () => {
+      row.classList.remove('drop-target-before','drop-target-after');
+    });
+    row.addEventListener('drop', (ev) => {
+      ev.preventDefault();
+      performReorder(dragFromIndex, i, dragOverPos || 'after');
+      clearDropMarkers();
+    });
+  });
+
+  drawWaveform();
+  updateFindCount();
+}
+
+/* Update only selected row inputs (for live drag feedback) */
+function updateSelectedRowInputs() {
+  if (selected < 0) return;
+  const row = list.querySelector(`.subtitle-row[data-i="${selected}"]`);
+  if (!row) return;
+  const selCue = cues[selected];
+  const startInput = row.querySelector('.start');
+  const endInput = row.querySelector('.end');
+  if (startInput) startInput.value = formatTime(selCue.start);
+  if (endInput) endInput.value = formatTime(selCue.end);
+}
+
+function clearDropMarkers(){
+  list.querySelectorAll('.drop-target-before,.drop-target-after')
+    .forEach(el => el.classList.remove('drop-target-before','drop-target-after'));
+}
+function handleDragOverRow(row, i, e){
+  e.preventDefault();
+  if (dragFromIndex === -1) return;
+  e.dataTransfer.dropEffect = 'move';
+  const rect = row.getBoundingClientRect();
+  const isBefore = (e.clientY - rect.top) < rect.height/2;
+  clearDropMarkers();
+  row.classList.add(isBefore ? 'drop-target-before' : 'drop-target-after');
+  dragOverIndex = i;
+  dragOverPos = isBefore ? 'before' : 'after';
+}
+
+function performReorder(from, to, pos) {
+  if (!Array.isArray(cues) || cues.length === 0) return;
+  if (from === -1 || to === -1) return;
+
+  // Рассчитать индекс вставки
+  let insertIndex = (pos === 'before') ? to : to + 1;
+  if (from < insertIndex) insertIndex--;     // сдвиг после удаления исходного
+  if (insertIndex === from || from === to) { // фактически ничего не изменилось
+    return;
+  }
+
+  // Переставляем
+  const moved = cues.splice(from, 1)[0];
+  cues.splice(insertIndex, 0, moved);
+  selected = insertIndex;
+
+  // «Умная» корректировка таймингов, чтобы блок встал между соседями
+  const prev = cues[insertIndex - 1] || null;
+  const next = cues[insertIndex + 1] || null;
+
+  const MIN_GAP = 0.02;  // минимальный зазор между репликами (сек)
+  const MIN_DUR = 0.10;  // минимальная длительность реплики (сек)
+  const mediaDur = (Number.isFinite(video?.duration) && video.duration > 0)
+    ? video.duration
+    : (audioBuffer?.duration || Infinity);
+
+  const clamp = (v, a, b) => Math.min(Math.max(v, a), b);
+  const originalDur = Math.max(MIN_DUR, (moved.end - moved.start) || MIN_DUR);
+
+  if (prev && next) {
+    const leftBound  = prev.end + MIN_GAP;
+    const rightBound = next.start - MIN_GAP;
+
+    if (rightBound > leftBound) {
+      const gap = rightBound - leftBound;
+      const dur = Math.min(originalDur, gap);
+      moved.start = leftBound;
+      moved.end   = leftBound + Math.max(MIN_DUR, Math.min(dur, gap));
+    } else {
+      // Места нет — ставим сразу после prev с минимальной длительностью,
+      // допускаем, что соприкоснёмся с next.
+      moved.start = leftBound;
+      moved.end   = Math.max(moved.start + MIN_DUR, rightBound);
+    }
+  } else if (prev && !next) {
+    // В конец списка: сразу после prev, сохраняя длительность
+    moved.start = Math.max(prev.end + MIN_GAP, 0);
+    moved.end   = moved.start + originalDur;
+    if (Number.isFinite(mediaDur)) {
+      moved.end = Math.min(moved.end, mediaDur);
+      if (moved.end - moved.start < MIN_DUR) moved.end = moved.start + MIN_DUR;
+    }
+  } else if (!prev && next) {
+    // В начало списка: прямо перед next
+    const rightBound = next.start - MIN_GAP;
+    const dur = Math.min(originalDur, Math.max(MIN_DUR, rightBound));
+    moved.end   = Math.max(0, rightBound);
+    moved.start = Math.max(0, moved.end - dur);
+    if (moved.end - moved.start < MIN_DUR) moved.start = Math.max(0, moved.end - MIN_DUR);
+  } else {
+    // Единственный элемент — просто нормализуем
+    moved.start = Math.max(0, moved.start || 0);
+    moved.end   = Math.max(moved.start + MIN_DUR, moved.end || (moved.start + MIN_DUR));
+  }
+
+  // Финальный кламп по длительности медиа
+  if (Number.isFinite(mediaDur)) {
+    moved.start = clamp(moved.start, 0, Math.max(0, mediaDur - MIN_DUR));
+    moved.end   = clamp(Math.max(moved.end, moved.start + MIN_DUR), moved.start + MIN_DUR, mediaDur);
+  }
+
+  pushHistory();   // фиксируем результат для undo/redo
+  render();
+  scrollToSelected();
+}
+
+function splitAtCaret(index, caretPos) {
+  const cue = cues[index];
+  const text = cue.text || '';
+  const left = text.slice(0, caretPos).trim();
+  const right = text.slice(caretPos).trim();
+
+  if (!right) return;
+
+  const midTime = cue.start + (cue.end - cue.start) * ((caretPos || 0) / (text.length || 1));
+  const oldEnd = cue.end;
+
+  cue.text = autoLineBreakText(left, AUTO_RULES.maxCpl, AUTO_RULES.maxLines);
+  cue.end = midTime;
+
+  const newCue = {
+    start: midTime,
+    end: oldEnd,
+    text: autoLineBreakText(right, AUTO_RULES.maxCpl, AUTO_RULES.maxLines)
+  };
+
+  cues.splice(index + 1, 0, newCue);
+  selected = index + 1;
+  pushHistory();
+  render();
+}
+function mergeWithPrevious(index){
+  if(index<=0) return;
+  cues[index-1].text=(cues[index-1].text+'\n'+cues[index].text).trim();
+  cues[index-1].end=cues[index].end;
+  cues.splice(index,1); selected=Math.max(0,index-1); render();
+}
+function deleteCue(index) {
+  if(cues[index]) { cues.splice(index,1); if(selected>=index){ selected=Math.max(0,selected-1); } render(); }
+}
+function addCue(afterIndex){
+  const hasIndex = Number.isInteger(afterIndex) && afterIndex >= 0 && afterIndex < cues.length;
+  const insertAt = hasIndex ? afterIndex + 1 : cues.length;
+  const start = hasIndex
+    ? cues[afterIndex].end
+    : (cues[cues.length - 1]?.end ?? video.currentTime);
+  const newCue = { start: Math.max(0,start), end: Math.max(0,start + 2), text: '' };
+  cues.splice(insertAt, 0, newCue);
+  selected = insertAt; pushHistory(); render();
+  list.querySelector(`.subtitle-row[data-i="${insertAt}"] textarea`)?.focus();
+}
+function sortCues(){ cues.sort((a,b)=>a.start-b.start); render(); }
+
+// Выбор активной строки без полного ререндера (опционально)
+function setSelectedIndex(newIndex, {scroll=false, rerender=false} = {}) {
+  if (newIndex === selected) { if (scroll) scrollToSelected(); return; }
+  if (rerender) {
+    selected = newIndex; render(); if (scroll) scrollToSelected(); return;
+  }
+  const prevEl = list.querySelector(`.subtitle-row[data-i="${selected}"]`);
+  if (prevEl) prevEl.classList.remove('active');
+  selected = newIndex;
+  const currEl = list.querySelector(`.subtitle-row[data-i="${selected}"]`);
+  if (currEl) currEl.classList.add('active');
+  if (scroll) scrollToSelected();
+  scheduleDraw();
+}
+
+// --- ЗУМ И ПАНОРАМИРОВАНИЕ ---
+
+// Сброс окна просмотра на весь диапазон
+function resetView() {
+  if (audioBuffer) {
+    viewStart = 0;
+    viewEnd = audioBuffer.duration;
+  } else {
+    viewStart = 0; viewEnd = 0;
+  }
+  updatePanSlider();
+}
+
+function showWaveformStatus(msg) {
+  if (!waveformStatus) return;
+  waveformStatus.textContent = msg || 'Загрузка…';
+  waveformStatus.style.display = 'block';
+  if (waveformPlayhead) waveformPlayhead.style.display = 'none';
+}
+function hideWaveformStatus() {
+  if (!waveformStatus) return;
+  waveformStatus.style.display = 'none';
+  if (waveformPlayhead) waveformPlayhead.style.display = '';
+}
+
+// Волна
+function drawWaveform(){
+  const dpr=window.devicePixelRatio||1;
+  waveformCanvas.width=waveformCanvas.offsetWidth*dpr; waveformCanvas.height=waveformCanvas.offsetHeight*dpr;
+  waveformCtx.setTransform(1,0,0,1,0,0); waveformCtx.scale(dpr,dpr);
+  const width=waveformCanvas.offsetWidth; const height=waveformCanvas.offsetHeight;
+  waveformCtx.clearRect(0,0,width,height);
+
+  if(!audioBuffer||!filteredData||filteredData.length===0){
+    return;
+  }
+  const maxAmp=filteredData.reduce((m, v) => v > m ? v : m, 0);
+  const ampRatio=height/(maxAmp*2.2);
+  waveformCtx.strokeStyle='#00aaff'; waveformCtx.lineWidth=1; waveformCtx.beginPath();
+  for(let i=0;i<filteredData.length;i++){
+    const x=i; const amp=filteredData[i]*ampRatio;
+    waveformCtx.moveTo(x,height/2-amp); waveformCtx.lineTo(x,height/2+amp);
+  }
+  waveformCtx.stroke();
+  cues.forEach((cue,index)=>{
+    const startX=timeToPixel(cue.start); const endX=timeToPixel(cue.end);
+    if (endX <= startX) return;
+    if(index===selected){
+      waveformCtx.fillStyle='rgba(255,165,0,0.4)'; waveformCtx.strokeStyle='#ffcc00'; waveformCtx.lineWidth=1;
+      waveformCtx.fillRect(startX,0,endX-startX,height); waveformCtx.strokeRect(startX,0,endX-startX,height);
+    } else {
+      waveformCtx.fillStyle='rgba(255,255,100,0.3)'; waveformCtx.fillRect(startX,0,endX-startX,height);
+    }
+  });
+}
+
+// Маппинг пиксель <-> время с учетом окна просмотра
+function pixelToTime(px){
+  if(!audioBuffer) return 0;
+  const w = waveformCanvas.offsetWidth || 1;
+  const ratio = Math.max(0, Math.min(1, px / w));
+  return viewStart + ratio * (viewEnd - viewStart);
+}
+function timeToPixel(time){
+  if(!audioBuffer) return 0;
+  const w = waveformCanvas.offsetWidth || 1;
+  const span = Math.max(0.001, viewEnd - viewStart);
+  const ratio = (time - viewStart) / span;
+  return Math.max(0, Math.min(w, ratio * w));
+}
+
+function getCueIndexAtTime(time){ return cues.findIndex(c=>time>=c.start&&c.end>=time); }
+function getHitRegion(mouseX,cue){
+  const startX=timeToPixel(cue.start); const endX=timeToPixel(cue.end);
+  if(mouseX>=startX&&mouseX<=startX+WAVEFORM_HANDLE_WIDTH) return 'resizing-start';
+  if(mouseX<=endX&&mouseX>=endX-WAVEFORM_HANDLE_WIDTH) return 'resizing-end';
+  if(mouseX>startX+WAVEFORM_HANDLE_WIDTH&&mouseX<endX-WAVEFORM_HANDLE_WIDTH) return 'moving';
+  return null;
+}
+
+async function processAudio(file) {
+  audioBuffer = null; filteredData = null;
+  showWaveformStatus('Анализ аудио…');
+  drawWaveform();
+
+  let audioContext;
+  try {
+    audioContext = new (window.AudioContext || window.webkitAudioContext)();
+    const arrayBuffer = await file.arrayBuffer();
+    const decoded = await audioContext.decodeAudioData(arrayBuffer);
+    audioBuffer = decoded;
+    resetView();
+    filteredData = filterDataForDrawing(audioBuffer, viewStart, viewEnd);
+    scheduleDraw();
+    hideWaveformStatus(); // готово — скрываем статус
+  } catch (e) {
+    console.error('Audio error:', e);
+    showWaveformStatus('Не удалось построить волну для данного файла.');
+  } finally {
+    try { await audioContext?.close(); } catch {}
+    updatePanSlider();
+  }
+}
+
+// Даунсемплинг данных под текущую видимую область
+function filterDataForDrawing(buffer, startSec = 0, endSec = null){
+  const width = waveformCanvas.offsetWidth;
+  if (!width) return [];
+  const sr = buffer.sampleRate;
+  const raw = buffer.getChannelData(0);
+  const sSec = startSec || 0;
+  const eSec = (endSec == null) ? buffer.duration : endSec;
+  const startSample = Math.max(0, Math.floor(sSec * sr));
+  const endSample = Math.min(raw.length, Math.floor(eSec * sr));
+  const span = Math.max(1, endSample - startSample);
+  const blockSize = Math.max(1, Math.floor(span / width));
+  const data = [];
+  for (let i = 0; i < width; i++) {
+    let s = startSample + i * blockSize;
+    let sum = 0, cnt = 0;
+    for (let j = 0; j < blockSize && (s + j) < endSample; j++) { sum += Math.abs(raw[s + j]); cnt++; }
+    data.push(cnt ? sum / cnt : 0);
+  }
+  return data;
+}
+
+/* ===================== Helpers для импорта/экспорта ===================== */
+function ensureHexColor(s) {
+  let v = String(s || '').trim();
+  if (!v) return '#ffffff';
+  const m3 = v.match(/^#([0-9a-f]{3})$/i);
+  if (m3) {
+    const r = m3[1][0], g = m3[1][1], b = m3[1][2];
+    return `#${r}${r}${g}${g}${b}${b}`.toLowerCase();
+  }
+  const m6 = v.match(/^#([0-9a-f]{6})$/i);
+  if (m6) return `#${m6[1].toLowerCase()}`;
+  return '#ffffff';
+}
+function normalizeNewlines(s) {
+  return (s || '').replace(/\r\n?/g, '\n').replace(/\u2028|\u2029/g, '\n');
+}
+function wrapWithFontColor(s, hex) {
+  if (!s) return '';
+  return `<font color="${hex}">${s}</font>`;
+}
+function toCRLF(s) {
+  return (s || '').replace(/\n/g, '\r\n');
+}
+function setSubtitleColor(hex) {
+  const color = ensureHexColor(hex || localStorage.getItem('subtitleColor') || '#ffffff');
+  document.documentElement.style.setProperty('--subtitle-color', color);
+  if (colorInput) colorInput.value = color;
+  if (colorSwatch) colorSwatch.style.background = color;
+  localStorage.setItem('subtitleColor', color);
+}
+function getCurrentColor() {
+  return ensureHexColor((colorInput && colorInput.value) || localStorage.getItem('subtitleColor') || '#ffffff');
+}
+
+// Удаление font-тегов c сохранением текста. Возвращает { text, color }
+function sanitizeImportedText(raw) {
+  const src = String(raw || '');
+
+  let detected = null;
+  const colorMatch = src.match(/<font\b[^>]*\bcolor\s*=\s*["']?\s*(#[0-9a-fA-F]{3,6})/i);
+  if (colorMatch) detected = ensureHexColor(colorMatch[1]);
+
+  let salvage = null;
+  const broken = src.match(/<font\b[^>]*\bcolor\s*=\s*"(.*?)<\/font>/i);
+  if (broken) {
+    salvage = (broken[1] || '').replace(/["<>]/g,'').trim();
+  }
+
+  const removedOpen = src.replace(/<font\b[^>]*>/gi, '');
+  const removedAll = removedOpen.replace(/<\/font\s*>/gi, '');
+  let cleaned = removedAll.trim();
+
+  if (!cleaned && salvage) cleaned = salvage;
+
+  return { text: cleaned, color: detected };
+}
+
+/* ===================== Парсинг SRT / VTT ===================== */
+const timeRe = /((?:\d{1,2}:)?\d{1,2}:\d{2}[,\.]\d{1,3})\s*-->\s*((?:\d{1,2}:)?\d{1,2}:\d{2}[,\.]\d{1,3})/;
+
+function parseSRT(text) {
+  if (!text) return [];
+  const input = text.replace(/\uFEFF/g, '').replace(/\r+/g, '');
+  const blocks = input.trim().split(/\n{2,}/);
+  const out = [];
+
+  for (const block of blocks) {
+    const lines = block.split('\n');
+    if (lines.length < 2) continue;
+
+    let i = 0;
+    if (/^\d+\s*$/.test(lines[0])) i = 1;
+
+    const timeLine = lines[i] || '';
+    const m = timeLine.match(timeRe);
+    if (!m) continue;
+
+    const start = parseTime(m[1]);
+    const end = parseTime(m[2]);
+    const rawText = lines.slice(i + 1).join('\n');
+    out.push({ start, end, text: rawText });
+  }
+  return out;
+}
+function parseVTT(text) {
+  if (!text) return [];
+  const input = text.replace(/\uFEFF/g, '').replace(/\r+/g, '');
+  const lines = input.split('\n');
+  const out = [];
+  let i = 0;
+
+  if (/^WEBVTT/i.test(lines[0])) i = 1;
+
+  for (; i < lines.length; i++) {
+    const line = lines[i];
+    if (line.includes('-->')) {
+      const m = line.match(timeRe);
+      if (!m) continue;
+      const start = parseTime(m[1]);
+      const end = parseTime(m[2]);
+      let j = i + 1; const textLines = [];
+      while (j < lines.length && lines[j].trim() !== '') { textLines.push(lines[j]); j++; }
+      out.push({ start, end, text: textLines.join('\n') });
+      i = j;
+    }
+  }
+  return out;
+}
+function parseFileText(text){
+  const trimmed = (text || '').trim();
+
+  let parsed = [];
+  if (/^WEBVTT/i.test(trimmed)) {
+    parsed = parseVTT(text);
+  } else {
+    parsed = parseSRT(text);
+  }
+
+  if (!parsed.length) {
+    const lines = text.replace(/\r\n?/g, '\n').split('\n'); const out=[];
+    for(let i=0;i<lines.length;i++){
+      if(lines[i].includes('-->')){
+        const times=lines[i].match(timeRe);
+        if(times){
+          const start=parseTime(times[1]); const end=parseTime(times[2]); let j=i+1; let textLines=[];
+          while(j<lines.length&&lines[j].trim()!==''){ textLines.push(lines[j]); j++; }
+          out.push({start,end,text:textLines.join('\n')}); i=j;
+        }
+      }
+    }
+    parsed = out;
+  }
+
+  let detectedColor = null;
+  const cleaned = parsed.map(c => {
+    const got = sanitizeImportedText(c.text);
+    if (!detectedColor && got.color) detectedColor = got.color;
+    return { start: c.start, end: c.end, text: got.text };
+  });
+  if (detectedColor) setSubtitleColor(detectedColor);
+
+  return cleaned;
+}
+
+/* ===================== Генераторы с корректной структурой и цветом ===================== */
+function generateSRT(){
+  const hex = getCurrentColor();
+  const blocks = cues.map((c,i)=>{
+    const raw = normalizeNewlines((c.text||'').trim());
+    const colored = wrapWithFontColor(raw, hex);
+    return `${i+1}\r\n${formatTime(c.start)} --> ${formatTime(c.end)}\r\n${colored}\r\n`;
+  });
+  return blocks.join('\r\n');
+}
+function generateVTT(){
+  const hex = getCurrentColor();
+  const blocks = cues.map((c)=>{
+    const raw = normalizeNewlines((c.text||'').trim());
+    const colored = wrapWithFontColor(raw, hex);
+    return `${formatTime(c.start,true)} --> ${formatTime(c.end,true)}\r\n${colored}\r\n`;
+  });
+  return `WEBVTT\r\n\r\n${blocks.join('\r\n')}`;
+}
+function generateTXT(){ return toCRLF(cues.map(c=>(c.text||'').trim()).join('\n\n')); }
+function generateCSV(){ 
+  return "index,start,end,text\r\n"+cues.map((c,i)=>[i+1,c.start,c.end,`"${(c.text||'').replace(/"/g,'""')}"`].join(',')).join('\r\n'); 
+}
+
+// Плейхед с учетом окна просмотра
+function updatePlayhead(){
+  const dur = audioBuffer ? ((viewEnd - viewStart) || audioBuffer.duration) : (video.duration || 0);
+  if (!dur) return;
+  const start = audioBuffer ? viewStart : 0;
+  const span = Math.max(0.001, dur);
+  let ratio = (video.currentTime - start) / span;
+  ratio = Math.max(0, Math.min(1, ratio));
+  waveformPlayhead.style.left = `${ratio * 100}%`;
+}
+
+function scrollToSelected(){ const el=list.querySelector('.subtitle-row.active'); if(el) el.scrollIntoView({behavior:'smooth',block:'center'}); }
+function modifySelectedCue(action){
+  if(selected<0||!cues[selected])return; 
+  const cue=cues[selected];
+
+  // Навигация без истории
+  if (action === 'jump-start') { video.currentTime = cue.start; return; }
+  if (action === 'jump-end')   { video.currentTime = cue.end;   return; }
+
+  // Изменяющие действия — в историю
+  pushHistory();
+  switch(action){
+    case'set-start': {
+      const t = Math.max(0, Math.min(video.currentTime, (video.duration || Infinity)));
+      cue.start=Math.min(t, cue.end-0.1);
+      break;
+    }
+    case'set-end': {
+      const t = Math.max(0, Math.min(video.currentTime, (video.duration || Infinity)));
+      cue.end=Math.max(t, cue.start+0.1);
+      break;
+    }
+    case'shift-back':
+      cue.start = Math.max(0, cue.start - 1.0); cue.end = Math.max(cue.start + 0.1, cue.end - 1.0);
+      break;
+    case'shift-fwd':
+      cue.start += 1.0; cue.end = Math.max(cue.start + 0.1, cue.end + 1.0);
+      break;
+  }
+  render();
+}
+
+// Toggle playback by clicking video area
+function safePlay() {
+  const p = video.play();
+  if (p && typeof p.then === 'function') p.catch(()=>{ /* ignore autoplay errors */ });
+}
+function togglePlayback(){
+  if(!video.src) return;
+  if (video.paused) safePlay(); else video.pause();
+}
+
+// UI события
+fileVid.addEventListener('change', async (ev)=>{ 
+  const f = ev.target.files[0]; if(!f) return;
+
+  // Revoke previous object URL
+  if (currentObjectUrl) { URL.revokeObjectURL(currentObjectUrl); currentObjectUrl = null; }
+
+  const url = URL.createObjectURL(f);
+  currentObjectUrl = url;
+
+  video.src = url; video.load(); mediaInfo.textContent = `${f.name} — ${Math.round(f.size/1024/1024*10)/10} MB`;
+  await processAudio(f);
+  if (cues.length === 0) {
+    cues.push({start: 1, end: 5, text: "Новый субтитр"});
+    selected = 0;
+  }
+  render(); 
+});
+fileSub.addEventListener('change', (ev)=>{ 
+  const f = ev.target.files[0]; if(!f) return;
+  const reader = new FileReader();
+  reader.onload = ()=>{
+    cues = parseFileText(reader.result);
+    if(!cues.length && reader.result.trim()){ cues=[{start:0,end:4,text:reader.result.trim()}]; }
+    selected = cues.length ? 0 : -1; pushHistory(); render();
+  };
+  reader.readAsText(f);
+});
+saveBtn.addEventListener('click', ()=>{
+  const fmt=saveFmt.value; let blob, name='subtitles.'+fmt;
+  if(fmt==='srt') blob=new Blob([generateSRT()],{type:'text/plain;charset=utf-8'});
+  else if(fmt==='vtt') blob=new Blob([generateVTT()],{type:'text/vtt;charset=utf-8'});
+  else if(fmt==='txt') blob=new Blob([generateTXT()],{type:'text/plain;charset=utf-8'});
+  else if(fmt==='csv') blob=new Blob([generateCSV()],{type:'text/csv;charset=utf-8'});
+  const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download=name; a.click();
+  setTimeout(()=>URL.revokeObjectURL(a.href),1000);
+});
+addBtn.addEventListener('click', ()=> addCue(selected));
+sortBtn.addEventListener('click', () => { pushHistory(); sortCues(); });
+
+vol.addEventListener('input', ()=> { video.volume = vol.value; updateVolumeSlider(); });
+
+/* Seekbar events */
+seekbar.addEventListener('input', () => {
+  if (video.duration) { video.currentTime = seekbar.valueAsNumber; }
+  currentTimeEl.textContent = formatTime(video.currentTime);
+  updateSeekbarFill();
+});
+
+// Превью субтитров и плейхед + синхронизация слайдера
+video.addEventListener('timeupdate', ()=>{
+  const t = video.currentTime;
+  const activeCue = cues.find(c => t >= c.start && t <= c.end);
+
+  if (activeCue && activeCue.text) {
+    const safeText = escapeHtml(activeCue.text);
+    const htmlText = safeText.replace(/\n/g, '<br>');
+    subtitlePreview.innerHTML = htmlText;
+  } else {
+    subtitlePreview.innerHTML = '';
+  }
+
+  const idx = cues.findIndex(c => t >= c.start && t <= c.end);
+  if (idx !== -1 && idx !== selected) {
+    setSelectedIndex(idx, { scroll: true, rerender: false });
+  }
+  updatePlayhead();
+
+  if (!seekbar.disabled) {
+    seekbar.value = t;
+    currentTimeEl.textContent = formatTime(t);
+    updateSeekbarFill();
+  }
+});
+
+// При загрузке метаданных видео — активируем слайдер
+video.addEventListener('loadedmetadata', () => {
+  seekbar.disabled = false;
+  seekbar.max = (video.duration || 0).toFixed(3);
+  seekbar.value = video.currentTime || 0;
+  currentTimeEl.textContent = formatTime(video.currentTime || 0);
+  totalDurationEl.textContent = formatTime(video.duration || 0);
+  updateSeekbarFill();
+});
+
+// Горячие клавиши
+window.addEventListener('keydown',(ev)=>{ 
+  if(['INPUT','TEXTAREA'].includes(document.activeElement.tagName)){
+    if(ev.key==='Tab'&&!ev.shiftKey&&!ev.ctrlKey&&!ev.altKey){
+      const activeRow=document.activeElement.closest('.subtitle-row'); 
+      if(activeRow){ev.preventDefault();const nextRow=list.querySelector(`.subtitle-row[data-i="${parseInt(activeRow.dataset.i)+1}"]`);if(nextRow){nextRow.querySelector('textarea')?.focus();}}
+    }
+    return;
+  }
+  if(ev.key==='Delete'&&selected!==-1){pushHistory();deleteCue(selected);return;}
+  if(ev.key===' '){ev.preventDefault();togglePlayback();}
+  if(ev.key==='ArrowDown'){ev.preventDefault();setSelectedIndex(Math.min(cues.length-1,selected+1), {rerender:true, scroll:true});}
+  if(ev.key==='ArrowUp'){ev.preventDefault();setSelectedIndex(Math.max(0,selected-1), {rerender:true, scroll:true});}
+  if((ev.ctrlKey||ev.metaKey)&&ev.key.toLowerCase()==='z'){ev.preventDefault();if(ev.shiftKey)redo();else undo();}
+});
+
+// Resize waveform on window resize
+window.addEventListener('resize', ()=>{ 
+  if(audioBuffer){ 
+    filteredData = filterDataForDrawing(audioBuffer, viewStart, viewEnd); 
+    drawWaveform();
+    updatePanSlider();
+  } 
+});
+
+// Найти/заменить
+toggleFindBtn.addEventListener('click', ()=>{ 
+  const isHidden = findReplaceWrapper.style.display === 'none';
+  findReplaceWrapper.style.display = isHidden ? 'flex' : 'none'; 
+  if (isHidden) {
+    findInput.focus();
+    findInput.select();
+  } else {
+    // Если не хотите очищать при закрытии — удалите следующие 2 строки:
+    findInput.value = '';
+    render();
+  }
+});
+
+findInput.addEventListener('input', () => {
+  render();
+});
+
+replaceBtn.addEventListener('click', ()=>{ 
+  const q=findInput.value; const r=replaceInput.value; if(!q) return;
+  pushHistory();
+  const regex=new RegExp(escapeRegex(q),'gi');
+  cues.forEach(c=>{c.text=(c.text||'').replace(regex,()=>r);});
+  render(); 
+});
+
+// Новый проект
+newBtn.addEventListener('click', ()=>{ 
+  if(cues.length === 0 || confirm("Начать новый проект? Все несохраненные изменения будут утеряны.")){ 
+    video.pause(); 
+    if (currentObjectUrl) { URL.revokeObjectURL(currentObjectUrl); currentObjectUrl = null; }
+    video.src=''; mediaInfo.textContent = '';
+    cues=[]; selected=-1; audioBuffer=null; filteredData=null;
+    resetView();
+	showWaveformStatus('Аудиограмма');
+    history=[]; future=[]; updateUndoRedoButtons();
+    pushHistory(); render();
+    resetSeekbar();
+    updatePanSlider();
+  }
+});
+
+undoBtn.addEventListener('click', undo); redoBtn.addEventListener('click', redo);
+jumpStartBtn.addEventListener('click',()=>modifySelectedCue('jump-start')); jumpEndBtn.addEventListener('click',()=>modifySelectedCue('jump-end'));
+setStartBtn.addEventListener('click',()=>modifySelectedCue('set-start')); setEndBtn.addEventListener('click',()=>modifySelectedCue('set-end'));
+shiftBackBtn.addEventListener('click',()=>modifySelectedCue('shift-back')); shiftFwdBtn.addEventListener('click',()=>modifySelectedCue('shift-fwd'));
+playPauseBtn.addEventListener('click',togglePlayback);
+stopBtn.addEventListener('click',()=>{video.pause();video.currentTime=0;});
+
+// Переключение эмодзи Play/Pause
+video.addEventListener('play',()=>{ playPauseLabel.textContent='⏸️'; });
+video.addEventListener('pause',()=>{ playPauseLabel.textContent='▶️'; });
+
+// Освобождение ObjectURL при уходе
+window.addEventListener('beforeunload', () => {
+  if (currentObjectUrl) { URL.revokeObjectURL(currentObjectUrl); currentObjectUrl = null; }
+});
+
+// Волна мышью: курсоры/drag/seek/панорамирование
+window.addEventListener('mousemove',(e)=>{
+  // MMB-панорамирование
+  if (panDrag.active) {
+    e.preventDefault();
+    const width = waveformCanvas.offsetWidth || 1;
+    const len = Math.max(MIN_VIEW_SEC, (panDrag.initViewEnd - panDrag.initViewStart));
+    const dx = e.clientX - panDrag.startX; // пиксели вправо (+)
+    let ns = panDrag.initViewStart - (dx / width) * len;
+    const dur = audioBuffer ? audioBuffer.duration : 0;
+    ns = Math.max(0, Math.min(ns, Math.max(0, dur - len)));
+    viewStart = ns; viewEnd = ns + len;
+    filteredData = filterDataForDrawing(audioBuffer, viewStart, viewEnd);
+    scheduleDraw();
+    updatePanSlider();
+    return;
+  }
+
+  // Обычная логика, если нет активного drag/resize
+  if(!waveformState.action){
+    if(audioBuffer){
+      const rect=waveformCanvas.getBoundingClientRect();
+      if(e.clientX>=rect.left&&e.clientX<=rect.right&&e.clientY>=rect.top&&e.clientY<=rect.bottom){
+        const mouseX=e.clientX-rect.left; const time=pixelToTime(mouseX); const cueIndex=getCueIndexAtTime(time);
+        if(cueIndex!==-1){
+          const region=getHitRegion(mouseX,cues[cueIndex]);
+          if(region==='moving')waveformCanvas.style.cursor='move';
+          else if(region)waveformCanvas.style.cursor='ew-resize';
+          else waveformCanvas.style.cursor='default';
+        }else{
+          waveformCanvas.style.cursor='default';
+        }
+      }else{waveformCanvas.style.cursor='default';}
+    }
+    return;
+  }
+
+  // Drag/resize/создание
+  e.preventDefault();
+  const rect=waveformCanvas.getBoundingClientRect(); const mouseX=e.clientX-rect.left;
+
+  if (Math.abs(mouseX - waveformState.initialMouseX) > CLICK_DRAG_THRESHOLD_PX) {
+    waveformState.dragMoved = true;
+  }
+
+  const currentTime=Math.max(0,pixelToTime(mouseX)); const cue=cues[waveformState.selectedIndex];
+  switch(waveformState.action){
+    case'moving':{
+      const timeDelta=pixelToTime(mouseX)-pixelToTime(waveformState.initialMouseX);
+      const duration=waveformState.initialCueEnd-waveformState.initialCueStart;
+      cue.start=Math.max(0,waveformState.initialCueStart+timeDelta);
+      cue.end=cue.start+duration;
+      if(audioBuffer && cue.end>audioBuffer.duration){cue.end=audioBuffer.duration;cue.start=cue.end-duration;}
+      break;
+    }
+    case'resizing-start':
+      cue.start=Math.min(currentTime,cue.end-0.1);
+      break;
+    case'resizing-end':
+      cue.end=Math.max(currentTime,cue.start+0.1);
+      break;
+    case'creating':{
+      const startTime=pixelToTime(waveformState.initialMouseX);
+      cue.start=Math.min(startTime,currentTime);
+      cue.end=Math.max(startTime,currentTime);
+      break;
+    }
+  }
+  // Лёгкий апдейт без полного ререндера
+  updateSelectedRowInputs();
+  scheduleDraw();
+});
+
+waveformCanvas.addEventListener('mousedown',(e)=>{
+  if(!audioBuffer)return;
+
+  // Средняя кнопка мыши — панорамирование
+  if (e.button === 1) {
+    e.preventDefault(); // отключить автопрокрутку браузера
+    panDrag.active = true;
+    panDrag.startX = e.clientX;
+    panDrag.initViewStart = viewStart;
+    panDrag.initViewEnd = viewEnd;
+    waveformCanvas.style.cursor = 'grabbing';
+    return;
+  }
+
+  // Только левая кнопка для редактирования
+  if (e.button !== 0) return;
+
+  const rect=waveformCanvas.getBoundingClientRect(); const mouseX=e.clientX-rect.left; const time=pixelToTime(mouseX);
+
+  waveformState.initialMouseX = mouseX;
+  waveformState.dragMoved = false;
+
+  const cueIndex=getCueIndexAtTime(time);
+  if(cueIndex!==-1){
+    const hitRegion=getHitRegion(mouseX,cues[cueIndex]);
+    waveformState.action = hitRegion || 'moving';
+    waveformState.selectedIndex=cueIndex;
+    waveformState.initialCueStart=cues[cueIndex].start; waveformState.initialCueEnd=cues[cueIndex].end;
+    setSelectedIndex(cueIndex, {rerender:true, scroll:false});
+  }else{
+    waveformState.action='creating';
+    const newCue={start:time,end:time+0.1,text:''}; cues.push(newCue); selected=cues.length-1; waveformState.selectedIndex=selected; render();
+  }
+});
+
+window.addEventListener('mouseup',(e)=>{
+  // Завершение MMB-панорамирования
+  if (panDrag.active) {
+    panDrag.active = false;
+    waveformCanvas.style.cursor = 'default';
+  }
+
+  if(!waveformState.action) return;
+
+  const wasClick = !waveformState.dragMoved;
+
+  if (wasClick) {
+    if (waveformState.action === 'creating') { cues.pop(); selected = -1; }
+    if (audioBuffer) {
+      const clickTime = pixelToTime(waveformState.initialMouseX);
+      const clamped = Math.min(Math.max(0, clickTime), video.duration || clickTime);
+      video.currentTime = clamped;
+    }
+    render();
+  } else {
+    if (waveformState.action === 'creating') {
+      const cue=cues[waveformState.selectedIndex];
+      if(cue && (cue.end - cue.start) < 0.1){ cues.pop(); selected=-1; }
+      else { pushHistory(); sortCues(); }
+    } else {
+      pushHistory(); sortCues();
+    }
+  }
+
+  waveformState.action=null; waveformState.selectedIndex=-1; waveformState.dragMoved=false;
+});
+
+// Зум колесом мыши и панорамирование (Shift+колесо)
+waveformCanvas.addEventListener('wheel', (e) => {
+  if (!audioBuffer) return;
+  e.preventDefault();
+  const rect = waveformCanvas.getBoundingClientRect();
+  const mouseX = e.clientX - rect.left;
+  const tAtMouse = pixelToTime(mouseX);
+
+  if (e.shiftKey) {
+    // Панорамирование на 10% длины окна
+    const len = Math.max(MIN_VIEW_SEC, viewEnd - viewStart);
+    const pan = len * (e.deltaY > 0 ? 0.1 : -0.1);
+    let ns = viewStart + pan;
+    let ne = viewEnd + pan;
+    if (ns < 0) { ne -= ns; ns = 0; }
+    if (ne > audioBuffer.duration) { const diff = ne - audioBuffer.duration; ns -= diff; ne = audioBuffer.duration; }
+    viewStart = ns; viewEnd = ne;
+  } else {
+    // Зум вокруг курсора
+    const factor = e.deltaY > 0 ? 1.2 : 0.8; // вниз — отдалить, вверх — приблизить
+    const prevLen = Math.max(0.001, viewEnd - viewStart);
+    let newLen = Math.max(MIN_VIEW_SEC, Math.min(audioBuffer.duration, prevLen * factor));
+    let ns = tAtMouse - (tAtMouse - viewStart) * (newLen / prevLen);
+    let ne = ns + newLen;
+
+    if (ns < 0) { ne -= ns; ns = 0; }
+    if (ne > audioBuffer.duration) { const diff = ne - audioBuffer.duration; ns -= diff; ne = audioBuffer.duration; }
+    if (ne - ns < MIN_VIEW_SEC) { ne = ns + MIN_VIEW_SEC; if (ne > audioBuffer.duration) { ns = Math.max(0, audioBuffer.duration - MIN_VIEW_SEC); ne = audioBuffer.duration; } }
+
+    viewStart = ns; viewEnd = ne;
+  }
+
+  filteredData = filterDataForDrawing(audioBuffer, viewStart, viewEnd);
+  scheduleDraw();
+  updatePanSlider();
+}, { passive: false });
+
+// Двойной клик — сброс масштаба
+waveformCanvas.addEventListener('dblclick', () => {
+  if (!audioBuffer) return;
+  resetView();
+  filteredData = filterDataForDrawing(audioBuffer, viewStart, viewEnd);
+  scheduleDraw();
+  updatePanSlider();
+});
+
+// Пан-слайдер: перетаскивание окна
+panSlider.addEventListener('input', () => {
+  if (!audioBuffer) return;
+  const dur = audioBuffer.duration || 0;
+  const viewLen = Math.max(MIN_VIEW_SEC, Math.min(dur, (viewEnd - viewStart) || 0));
+  const maxStart = Math.max(0, dur - viewLen);
+  let s = Math.min(maxStart, Math.max(0, panSlider.valueAsNumber || 0));
+  viewStart = s;
+  viewEnd = s + viewLen;
+  filteredData = filterDataForDrawing(audioBuffer, viewStart, viewEnd);
+  scheduleDraw();
+  updatePanSlider();
+});
+
+// Клик по плееру — Play/Pause
+videoWrapper.addEventListener('click', togglePlayback);
+
+/* Color picker logic */
+(() => {
+  const defaultColor = '#ffffff';
+  const saved = localStorage.getItem('subtitleColor') || defaultColor;
+  setSubtitleColor(saved);
+
+  colorBtn.addEventListener('click', () => {
+    if (colorInput.showPicker) colorInput.showPicker(); else colorInput.click();
+  });
+  colorInput.addEventListener('input', () => {
+    setSubtitleColor(colorInput.value || defaultColor);
+  });
+})();
+
+/* Drag & Drop: drop в пустую область списка -> в конец */
+list.addEventListener('dragover', (e) => {
+  if (dragFromIndex === -1) return;
+  const targetRow = e.target.closest('.subtitle-row');
+  if (!targetRow) {
+    e.preventDefault();
+    clearDropMarkers();
+    const last = list.querySelector('.subtitle-row:last-child');
+    if (last) {
+      last.classList.add('drop-target-after');
+      dragOverIndex = parseInt(last.dataset.i, 10);
+      dragOverPos = 'after';
+    }
+  }
+});
+list.addEventListener('drop', (e) => {
+  if (dragFromIndex === -1) return;
+  const targetRow = e.target.closest('.subtitle-row');
+  if (!targetRow) {
+    e.preventDefault();
+    performReorder(dragFromIndex, cues.length - 1, 'after');
+    clearDropMarkers();
+  }
+});
+
+// Init
+showWaveformStatus('Аудиограмма');
+pushHistory(); updateUndoRedoButtons();
+resetSeekbar();
+updateVolumeSlider();
+updatePanSlider();
+drawWaveform();
+</script>
+</body>
+</html>
