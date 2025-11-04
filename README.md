@@ -54,7 +54,7 @@ This tool is designed for videographers, translators, and anyone who needs a fas
 
 ## 🚀 Getting Started
 
-1.  Download the html-file from the [latest release (still in russian)](https://github.com/testertv/LocalSubtitleEditor/releases/download/v.2025.11.02/LocalSubtitleEditor_v.2025.11.02.html). (Right-click the link -> "Save Link As...").
+1.  Download the html-file from the [latest release (still in russian)](https://github.com/testertv/LocalSubtitleEditor/releases/download/v.2025.11.04/LocalSubtitleEditor_v.2025.11.04_Beta.html). (Right-click the link -> "Save Link As...").
 2.  Drag and drop the downloaded `index.html` file into your browser window (works on Chrome, Firefox, Edge, etc.).
 4.  Use the "Load Video" and "Load Subtitles" buttons to begin your project.
 
